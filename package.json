@@ -1,0 +1,31 @@
+{
+  "name": "@watchtowerobservability/react-native",
+  "version": "0.1.0",
+  "repository": { "type": "git", "url": "git+https://github.com/watchtowerobservability/watchtower-react-native.git" },
+  "publishConfig": { "registry": "https://npm.pkg.github.com" },
+  "description": "Watchtower for React Native: JS errors, navigation, touch breadcrumbs and performance spans, bridged to the native iOS and Android SDKs (plain JavaScript)",
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
+  "files": ["src", "plugin", "scripts", "ios", "android", "app.plugin.js", "WatchtowerRN.podspec", "react-native.config.js"],
+  "bin": { "wt-rn-sourcemaps": "scripts/upload-sourcemaps.js" },
+  "exports": {
+    ".": { "types": "./src/index.d.ts", "default": "./src/index.js" },
+    "./app.plugin": "./app.plugin.js",
+    "./package.json": "./package.json"
+  },
+  "license": "Apache-2.0",
+  "engines": { "node": ">=18" },
+  "scripts": { "test": "jest" },
+  "peerDependencies": {
+    "react": ">=18",
+    "react-native": ">=0.72",
+    "expo-router": ">=3",
+    "@expo/config-plugins": ">=7"
+  },
+  "peerDependenciesMeta": {
+    "expo-router": { "optional": true },
+    "@expo/config-plugins": { "optional": true }
+  },
+  "devDependencies": { "jest": "^29.7.0" },
+  "jest": { "testEnvironment": "node", "testMatch": ["<rootDir>/test/*.test.js"] }
+}
