@@ -3,6 +3,7 @@ const { Client, get, setClient } = require('./client');
 const errors = require('./errors');
 const perf = require('./perf');
 const nav = require('./navigation');
+const { sendFeedback } = require('./feedback');
 
 /** Start Watchtower. Call once, as early as possible (top of index.js). Returns the client; never throws on a bad runtime, only on a missing key. */
 function init(options) {
@@ -27,6 +28,10 @@ module.exports = {
   startSpan: perf.startSpan,
   reportAppReady: perf.reportAppReady,
   flush() { const c = get(); return c ? c.flush() : Promise.resolve(); },
+  /** User feedback linked to `eventId`, by default the last error recorded; resolves false when not accepted (never throws). */
+  feedback(f) { const c = get(); return c ? sendFeedback(c, f) : Promise.resolve(false); },
+  /** Consecutive launch crashes and whether the app is crash looping (enter a safe mode); never throws. */
+  crashLoop() { const c = get(); return c ? c.crashLoop() : Promise.resolve({ launchCrashCount: 0, isCrashLooping: false }); },
   close() { setClient(null); },
   instrumentNavigation: nav.instrumentNavigation,
   trackRoute: nav.trackRoute,

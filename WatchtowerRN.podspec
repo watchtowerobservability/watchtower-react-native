@@ -13,6 +13,6 @@ Pod::Spec.new do |s|
   s.source_files = 'ios/*.{h,m,swift}'
   s.swift_version = '5.9'
   s.dependency 'React-Core'
-  # The native iOS SDK (sdks/ios, mirrored as watchtower-ios) must be available to CocoaPods as `Watchtower`.
-  s.dependency 'Watchtower', pkg['version']
+  # The native iOS SDK (sdks/ios/WatchtowerSDK.podspec, mirrored as watchtower-ios).
+  s.dependency 'WatchtowerSDK', pkg['version']
 end

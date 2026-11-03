@@ -30,6 +30,13 @@ export interface InitOptions {
   replay?: ReplayOptions;
   /** Add a W3C `traceparent` header to fetches whose URL matches (string contains, or RegExp). */
   tracePropagationTargets?: Array<string | RegExp>;
+  /**
+   * iOS bundle id / Android package name sent as `X-Watchtower-App-Id`; must be on the publishable
+   * key's app ids. Defaults to the native module's value.
+   */
+  appId?: string;
+  /** `crashLoop().isCrashLooping` is true from this many consecutive launch crashes (native default 2). */
+  crashLoopThreshold?: number;
   /** Default true. */
   captureErrors?: boolean;
   network?: boolean;
@@ -37,6 +44,14 @@ export interface InitOptions {
   /** Set false when the native SDK is started from AppDelegate / Application for earlier crash capture. */
   startNative?: boolean;
   debug?: boolean;
+}
+
+export interface Feedback {
+  message: string;
+  name?: string;
+  email?: string;
+  /** Error event this is about; default: the last error the SDK recorded. */
+  eventId?: string;
 }
 
 export interface Span {
@@ -63,6 +78,15 @@ export function setContext(attrs: Record<string, string | number | boolean>): vo
 export function startSpan(name: string, attrs?: Record<string, string | number | boolean>): Span;
 export function reportAppReady(): void;
 export function flush(): Promise<void>;
+/** Sends user feedback to the edge; resolves false when it was not accepted (never throws). */
+export function feedback(f: Feedback): Promise<boolean>;
+export interface CrashLoopState {
+  /** Consecutive launches that crashed within 5 s, counted by the native SDK. */
+  launchCrashCount: number;
+  isCrashLooping: boolean;
+}
+/** The native crash-loop guard; zeros without the native module. Never throws. */
+export function crashLoop(): Promise<CrashLoopState>;
 export function close(): void;
 export function instrumentNavigation(ref: NavigationRefLike): { onReady(): void; unsubscribe(): void };
 export function trackRoute(name: string, params?: object): void;

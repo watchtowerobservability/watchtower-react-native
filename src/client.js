@@ -36,9 +36,12 @@ class Client {
       debug: !!o.debug,
       replay: o.replay,
       tracePropagationTargets: o.tracePropagationTargets || [],
+      crashLoopThreshold: o.crashLoopThreshold,
     };
     this.fetch = o.fetch || (typeof fetch === 'function' ? fetch.bind(globalThis) : null);
     this.native = o.native === undefined ? loadNative() : o.native;
+    // An app sends no Origin: the edge accepts the key only with this id on its app id list.
+    this.cfg.appId = o.appId || (this.native && this.native.appId) || undefined;
     this.sessionId = newId();
     this.context = {};
     this.crumbs = [];
@@ -50,9 +53,32 @@ class Client {
     this.cleanups = [];
     this.now = o.now || Date.now;
     if (this.native && o.startNative !== false && typeof this.native.start === 'function') {
-      const { key, service, endpoint, environment, release, replay } = this.cfg;
-      try { this.native.start({ key, service, endpoint, environment, release, replay: replay || null }); } catch (_) { /* native start is best effort */ }
+      const { key, service, endpoint, environment, release, replay, crashLoopThreshold } = this.cfg;
+      try {
+        this.native.start({ key, service, endpoint, environment, release, replay: replay || null, crashLoopThreshold: crashLoopThreshold || null });
+      } catch (_) { /* native start is best effort */ }
     }
+  }
+
+  /**
+   * The native crash-loop guard (DX 15): JS fatals end the process through the native crash
+   * handler, so the native SDK counts them with native crashes. Without the native module: none.
+   */
+  async crashLoop() {
+    const none = { launchCrashCount: 0, isCrashLooping: false };
+    if (!this.native || typeof this.native.crashLoop !== 'function') return none;
+    try {
+      const r = await this.native.crashLoop();
+      const n = Number(r && r.launchCrashCount) || 0;
+      return { launchCrashCount: n, isCrashLooping: !!(r && r.isCrashLooping) };
+    } catch (_) { return none; }
+  }
+
+  /** Headers of every edge POST. */
+  headers() {
+    const h = { Authorization: `Bearer ${this.cfg.key}`, 'Content-Type': 'application/json' };
+    if (this.cfg.appId) h['X-Watchtower-App-Id'] = this.cfg.appId;
+    return h;
   }
 
   /** Never prints the key. */
@@ -69,6 +95,7 @@ class Client {
       e.trace_id = t.traceId;
       if (t.spanId) e.span_id = t.spanId;
       if (this.cfg.redact) { e = this.cfg.redact(e); if (!e) return; }
+      if (e.type === 'error') this.lastErrorId = e.id;
       if (this.native) { this.native.record(JSON.stringify(e)); return; }
       if (this.queue.length >= QUEUE_MAX) this.queue.shift();
       this.queue.push(e);
@@ -109,7 +136,7 @@ class Client {
     };
     try {
       const res = await this.fetch(`${this.cfg.endpoint}/v1/rum/events`, {
-        method: 'POST', headers: { Authorization: `Bearer ${this.cfg.key}`, 'Content-Type': 'application/json', 'x-wt-internal': '1' },
+        method: 'POST', headers: { ...this.headers(), 'x-wt-internal': '1' },
         body: JSON.stringify(body),
       });
       if (res.ok) { this.failures = 0; }

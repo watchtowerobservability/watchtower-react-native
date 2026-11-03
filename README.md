@@ -9,7 +9,6 @@ JS transport against the same `/v1/rum/events` endpoint.
 ## Install
 
 ```sh
-echo '@watchtowerobservability:registry=https://npm.pkg.github.com' >> .npmrc
 npm install @watchtowerobservability/react-native
 cd ios && pod install
 ```
@@ -54,6 +53,29 @@ to `plugins`, then read `Constants.expoConfig.extra.watchtower` and pass it to `
 | `captureErrors`, `network`, `stalls` | Set `false` to turn a feature off |
 
 Incoming `wt.*` attributes are removed (the gateway deletes them anyway). Delivery is at-least-once.
+
+## App id
+
+The SDK sends the app id as `X-Watchtower-App-Id`: the `appId` option, else the bundle id / package name from the native module. An app sends no `Origin`, so add the iOS bundle id and the Android package name to the publishable key's **app ids** (Settings, Browser keys) or the edge refuses events and feedback with 403 `app_id_not_allowed`.
+
+## User feedback
+
+```js
+const ok = await Watchtower.feedback({ message: 'The checkout button does nothing', name: 'Ann', email: 'ann@example.com' });
+```
+
+It is linked to the last error the SDK recorded (or pass `eventId`) and posted from JS, with or
+without the native SDK. Name and email become pseudonyms at the edge. Resolves `false` when nothing
+was accepted; never throws.
+
+Crash-loop guard: the native iOS and Android SDKs detect launch crashes and tag them
+(`crash.launch`); a JS fatal ends the process through the native handler, so it counts too. Read
+the guard from JS to enter a safe mode (threshold: `crashLoopThreshold`, default 2):
+
+```js
+const { isCrashLooping } = await Watchtower.crashLoop();
+if (isCrashLooping) { /* skip the risky start-up work, offer a reset */ }
+```
 
 ## Source maps
 

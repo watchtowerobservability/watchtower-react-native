@@ -3,5 +3,6 @@
 @interface RCT_EXTERN_MODULE(WatchtowerRN, NSObject)
 RCT_EXTERN_METHOD(start:(NSDictionary *)options)
 RCT_EXTERN_METHOD(record:(NSString *)json)
+RCT_EXTERN_METHOD(crashLoop:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
 RCT_EXTERN_METHOD(flush)
 @end

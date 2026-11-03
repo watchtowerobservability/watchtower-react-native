@@ -1,6 +1,8 @@
 package dev.watchtower.rn
 
 import android.app.Application
+import com.facebook.react.bridge.Arguments
+import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
@@ -17,6 +19,9 @@ import java.util.UUID
 class WatchtowerRNModule(ctx: ReactApplicationContext) : ReactContextBaseJavaModule(ctx) {
     override fun getName() = "WatchtowerRN"
 
+    /** `NativeModules.WatchtowerRN.appId`: the package name the JS layer sends as `X-Watchtower-App-Id`. */
+    override fun getConstants(): Map<String, Any> = mapOf("appId" to reactApplicationContext.packageName)
+
     @ReactMethod
     fun start(o: ReadableMap) {
         val key = o.getString("key") ?: return
@@ -32,6 +37,11 @@ class WatchtowerRNModule(ctx: ReactApplicationContext) : ReactContextBaseJavaMod
                 enabled = replay?.takeIf { it.hasKey("enabled") }?.getBoolean("enabled") ?: false,
                 maskText = replay?.takeIf { it.hasKey("maskText") }?.getBoolean("maskText") ?: true,
             ),
+            crashLoopThreshold = if (o.hasKey("crashLoopThreshold") && !o.isNull("crashLoopThreshold")) {
+                o.getInt("crashLoopThreshold").coerceAtLeast(1)
+            } else {
+                2
+            },
         )
         Watchtower.init(reactApplicationContext.applicationContext as Application, cfg) // no-op if already initialised
     }
@@ -50,6 +60,17 @@ class WatchtowerRNModule(ctx: ReactApplicationContext) : ReactContextBaseJavaMod
                 tsNs = o.optLong("ts_ns", System.currentTimeMillis() * 1_000_000L),
                 id = o.optString("id", UUID.randomUUID().toString()),
             ),
+        )
+    }
+
+    /** The native crash-loop guard (DX 15); a JS fatal ends the process through the native handler, so it counts. */
+    @ReactMethod
+    fun crashLoop(p: Promise) {
+        p.resolve(
+            Arguments.createMap().apply {
+                putInt("launchCrashCount", Watchtower.launchCrashCount)
+                putBoolean("isCrashLooping", Watchtower.isCrashLooping)
+            },
         )
     }
 
