@@ -3,6 +3,9 @@
 // Uploads a React Native / Hermes source map. Same request shape as `wtctl sourcemaps upload`.
 //   wt-rn-sourcemaps --bundle index.android.bundle --map metro.map [--hermes-map out.hbc.map]
 //                    --api https://api.example.com --project my-project [--release 1.2.3+45] [--dist 45]
+// Over-the-air updates (`expo export` / `eas update`, built with --source-maps): one upload per platform bundle, release =
+// app version (--release, WT_RELEASE or dist/expoConfig.json), dist = the update id (--update-id, or metadata.json).
+//   wt-rn-sourcemaps --expo-export dist --update-id <id> --api ... --project ...
 // Secret API key from WT_API_KEY (never a flag, so it stays out of process lists and CI logs).
 const fs = require('node:fs');
 const os = require('node:os');
@@ -56,13 +59,44 @@ async function upload(o, env = process.env, opts = {}) {
   return { name: o.bundle, release: rel, url };
 }
 
-module.exports = { parseArgs, upload, composeMaps };
+/** Bundles and maps `expo export` wrote under `dir/_expo/static/js/{ios,android}`; the map sits beside the bundle (`x.hbc.map`). */
+function expoBundles(dir) {
+  const found = [];
+  for (const platform of ['ios', 'android']) {
+    const d = path.join(dir, '_expo', 'static', 'js', platform);
+    if (!fs.existsSync(d)) continue;
+    for (const f of fs.readdirSync(d)) {
+      if (!/\.(hbc|js)$/.test(f) || !fs.existsSync(path.join(d, `${f}.map`))) continue;
+      found.push({ platform, bundle: f, map: path.join(d, `${f}.map`) });
+    }
+  }
+  return found;
+}
+
+function readJson(f) { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (_) { return {}; } }
+
+async function uploadExpoExport(o, env = process.env, opts = {}) {
+  const dir = o.expoExport;
+  const meta = readJson(path.join(dir, 'metadata.json'));
+  const dist = o.updateId || o.dist || meta.updateId || meta.id;
+  if (!dist) throw new Error('--update-id is required (metadata.json carries none)');
+  const rel = o.release || env.WT_RELEASE || readJson(path.join(dir, 'expoConfig.json')).version;
+  if (!rel) throw new Error('--release is required (app version; dist/expoConfig.json carries none)');
+  const bundles = expoBundles(dir);
+  if (!bundles.length) throw new Error(`no bundle with a .map under ${dir}/_expo/static/js (run expo export --source-maps)`);
+  const out = [];
+  for (const b of bundles) out.push(await upload({ ...o, bundle: b.bundle, map: b.map, release: rel, dist }, env, opts));
+  return out;
+}
+
+module.exports = { parseArgs, upload, composeMaps, expoBundles, uploadExpoExport };
 
 if (require.main === module) {
   const o = parseArgs(process.argv.slice(2));
   const env = process.env;
   o.api = o.api || env.WT_API_URL;
   o.project = o.project || env.WT_PROJECT;
-  upload(o).then((r) => console.log(`watchtower: uploaded ${r.name}${r.release ? ` (release ${r.release})` : ''}`))
+  (o.expoExport ? uploadExpoExport(o) : upload(o).then((r) => [r]))
+    .then((rs) => rs.forEach((r) => console.log(`watchtower: uploaded ${r.name}${r.release ? ` (release ${r.release})` : ''}`)))
     .catch((e) => { console.error(`watchtower: ${e.message}`); process.exit(o.failOnError === 'false' ? 0 : 1); });
 }

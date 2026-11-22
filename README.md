@@ -86,6 +86,22 @@ WT_API_KEY=<secret api key> wt-rn-sourcemaps --bundle index.android.bundle --map
 
 The secret key comes from the environment only. Use the same `release` in `init`.
 
+### Over-the-air updates (`expo export` / `eas update`)
+
+Frames of an OTA bundle symbolicate against that update's map: upload it with release = app version and dist = the update id. The SDK reports `dist` from `expo-updates` (`Updates.updateId`) on its own.
+
+```sh
+npx expo export --source-maps
+WT_API_KEY=<secret api key> npx wt-rn-sourcemaps --expo-export dist --update-id "$UPDATE_ID" \
+  --api https://api.example.com --project shop --release 1.4.0
+```
+
+With EAS, run the second command right after `eas update` (the group id in its JSON output is the update id; `--release` defaults to `dist/expoConfig.json` `version`). In CI: `eas update --json --non-interactive | tee update.json` then pass the update id from it. Native builds keep using the Gradle / Xcode hooks the Expo plugin adds.
+
+## User, consent and stop
+
+`setUser({ id })` sends a salted hash (never the id). `init({ consent: 'pending' })` captures nothing until `setConsent('granted')`; `setConsent('denied')` or `stop()` removes native crash capture and clears queues now, and the denial persists across launches until `setConsent('granted')` (or an explicit `consent: 'granted'` in `init`).
+
 ## Provenance
 
 `gh attestation verify <file> --repo watchtowerobservability/watchtower-react-native`

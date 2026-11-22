@@ -11,6 +11,8 @@ const newId = () => `${hex(8)}-${hex(4)}-4${hex(3)}-a${hex(3)}-${hex(12)}`;
 const newTraceId = () => hex(32);
 const newSpanId = () => hex(16);
 
+const CRASH_ATTRS = new Set(['error.stack', 'stack', 'frames', 'threads', 'error.threads', 'debug_images']);
+
 /** The gateway deletes `wt.*`, so they are dropped here; long keys and strings are cut to the wire limits. */
 function safeAttrs(a) {
   const out = {};
@@ -18,7 +20,8 @@ function safeAttrs(a) {
     if (k.startsWith('wt.') || k.length > 128) continue;
     const v = a[k];
     if (v === undefined || v === null) continue;
-    out[k] = typeof v === 'string' && v.length > 2048 ? v.slice(0, 2048) : v;
+    const cap = CRASH_ATTRS.has(k) ? 32768 : 2048; // the edge's limits for crash attributes
+    out[k] = typeof v === 'string' && v.length > cap ? v.slice(0, cap) : v;
   }
   return out;
 }

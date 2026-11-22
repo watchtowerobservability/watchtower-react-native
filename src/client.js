@@ -1,7 +1,8 @@
 'use strict';
 const { newId, newTraceId, newSpanId, safeAttrs, maskKey } = require('./util');
+const { sha256Hex } = require('./sha256');
 
-const SDK = { name: 'watchtower.react-native', version: '0.1.0' };
+const SDK = { name: 'watchtower.react-native', version: '0.2.0' };
 const DEFAULT_ENDPOINT = 'http://localhost:4318';
 const QUEUE_MAX = 500;
 const FLUSH_EVENTS = 50;
@@ -22,6 +23,30 @@ function loadNative() {
   } catch (_) { return null; }
 }
 
+/** The OTA update id (expo-updates, optional peer); null in embedded builds or without expo-updates. */
+function updateId() {
+  try { return require('expo-updates').updateId || undefined; } catch (_) { return undefined; }
+}
+
+/**
+ * Native SDK knobs passed through the bridge (null = native default): native screen views, native
+ * URLSession/HttpURLConnection-level resources, hang/ANR threshold, launch profiling, build id for
+ * symbolication, and the propagateTo prefixes for native traceparent injection.
+ */
+function nativeStartOptions(cfg) {
+  const n = cfg.nativeOptions || {};
+  const pick = (k) => (n[k] === undefined ? null : n[k]);
+  return {
+    trackViews: pick('trackViews'),
+    trackNetwork: pick('trackNetwork'),
+    hangThresholdMs: pick('hangThresholdMs'),
+    profileLaunch: pick('profileLaunch'),
+    buildId: pick('buildId'),
+    propagateTo: Array.isArray(n.propagateTo) ? n.propagateTo : cfg.tracePropagationTargets.filter((t) => typeof t === 'string'),
+  };
+}
+
+/** Native-collected telemetry (native crashes, hangs, launch, frames, native views and resources) goes straight to the native buffer. */
 class Client {
   constructor(o) {
     if (!o || !o.key) throw new Error('watchtower: `key` (publishable ingest key) is required');
@@ -37,6 +62,8 @@ class Client {
       replay: o.replay,
       tracePropagationTargets: o.tracePropagationTargets || [],
       crashLoopThreshold: o.crashLoopThreshold,
+      nativeOptions: o.nativeOptions,
+      dist: o.dist || updateId(),
     };
     this.fetch = o.fetch || (typeof fetch === 'function' ? fetch.bind(globalThis) : null);
     this.native = o.native === undefined ? loadNative() : o.native;
@@ -52,12 +79,66 @@ class Client {
     this.timer = null;
     this.cleanups = [];
     this.now = o.now || Date.now;
-    if (this.native && o.startNative !== false && typeof this.native.start === 'function') {
-      const { key, service, endpoint, environment, release, replay, crashLoopThreshold } = this.cfg;
-      try {
-        this.native.start({ key, service, endpoint, environment, release, replay: replay || null, crashLoopThreshold: crashLoopThreshold || null });
-      } catch (_) { /* native start is best effort */ }
+    this.userHash = undefined;
+    this.userP = null;
+    this.warned = {};
+    this.startNativeWanted = o.startNative !== false;
+    // Without an explicit option, a denial persisted by `stop()` / `setConsent('denied')` holds across launches.
+    this.consent = o.consent || (this.native && this.native.stopped === true ? 'denied' : 'granted');
+    if (this.consent === 'granted') this.startNative(o.consent === 'granted');
+  }
+
+  /** `explicit`: the app granted consent, which also lifts a denial persisted natively. */
+  startNative(explicit) {
+    if (!this.native || !this.startNativeWanted || typeof this.native.start !== 'function') return;
+    const { key, service, endpoint, environment, release, replay, crashLoopThreshold } = this.cfg;
+    try {
+      this.native.start({
+        key, service, endpoint, environment, release, replay: replay || null, crashLoopThreshold: crashLoopThreshold || null,
+        consent: explicit ? 'granted' : null,
+        ...nativeStartOptions(this.cfg),
+      });
+    } catch (_) { /* native start is best effort */ }
+  }
+
+  /** 'granted' starts capture (and native capture); 'denied' is `stop()`. 'pending' only exists at init. */
+  setConsent(v) {
+    if (v === 'granted') {
+      if (this.consent === 'granted') return;
+      this.consent = 'granted';
+      this.startNative(true);
+    } else if (v === 'denied') this.stop();
+  }
+
+  /** Stop now: native crash handler removed, native crash buffer deleted, timers and queues cleared, denial persisted natively. */
+  stop() {
+    this.consent = 'denied';
+    if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+    this.queue = [];
+    this.crumbs = [];
+    this.userHash = undefined;
+    this.userP = null;
+    if (this.native && typeof this.native.stop === 'function') { try { this.native.stop(); } catch (_) { /* best effort */ } }
+  }
+
+  /** Like the browser SDK: SHA-256 of `salt:id` (salt from `/v1/rum/config`); the raw id is never sent. `null` clears. */
+  setUser(u) {
+    const id = u && u.id != null ? String(u.id) : '';
+    this.userHash = undefined;
+    this.userP = null;
+    if (!id || this.consent !== 'granted') return;
+    if (!this.saltP) {
+      this.saltP = Promise.resolve().then(() => this.fetch(`${this.cfg.endpoint}/v1/rum/config`, { headers: this.headers() }))
+        .then((r) => (r.ok ? r.json() : {})).then((j) => (j && typeof j.id_salt === 'string' ? j.id_salt : '')).catch(() => '');
     }
+    const p = this.saltP.then((salt) => { if (this.userP === p) this.userHash = sha256Hex(`${salt}:${id}`); });
+    this.userP = p;
+  }
+
+  warnOnce(k, msg) {
+    if (this.warned[k]) return;
+    this.warned[k] = true;
+    console.warn(`[watchtower] ${msg}`);
   }
 
   /**
@@ -85,10 +166,11 @@ class Client {
   toString() { return `Watchtower(${this.cfg.service} key=${maskKey(this.cfg.key)} ${this.native ? 'native' : 'js'})`; }
 
   record(type, name, attrs, value, ids) {
+    if (this.consent !== 'granted') return;
     try {
       let e = {
         id: newId(), ts_ns: this.now() * 1e6, type, name,
-        attrs: safeAttrs({ ...this.context, ...attrs, 'session.id': this.sessionId }),
+        attrs: safeAttrs({ ...this.context, ...attrs, 'session.id': this.sessionId, ...(this.cfg.dist && { 'app.dist': this.cfg.dist }) }),
       };
       if (value !== undefined) e.value = value;
       const t = ids || this.trace;
@@ -113,6 +195,7 @@ class Client {
   }
 
   breadcrumb(category, message, data) {
+    if (this.consent !== 'granted') return;
     this.crumbs.push({ ts: this.now(), category, message: String(message).slice(0, 200), ...(data ? { data } : {}) });
     if (this.crumbs.length > CRUMBS_MAX) this.crumbs.shift();
   }
@@ -126,13 +209,15 @@ class Client {
   }
 
   async flush() {
+    if (this.consent !== 'granted') return;
     if (this.native) { try { this.native.flush(); } catch (_) { /* ignore */ } return; }
     if (!this.fetch || !this.queue.length || this.now() < this.retryAt) return;
+    if (this.userP) await this.userP;
     const events = this.queue.splice(0, 200);
     const body = {
       session_id: this.sessionId, sent_at_ns: this.now() * 1e6, sdk: SDK,
-      app: { service: this.cfg.service, ...(this.cfg.release && { release: this.cfg.release }), ...(this.cfg.environment && { env: this.cfg.environment }) },
-      page: { url: `app://${this.cfg.service}` }, device: { ua: 'react-native' }, user: {}, attrs: {}, events,
+      app: { service: this.cfg.service, ...(this.cfg.release && { release: this.cfg.release }), ...(this.cfg.dist && { dist: this.cfg.dist }), ...(this.cfg.environment && { env: this.cfg.environment }) },
+      page: { url: `app://${this.cfg.service}` }, device: { ua: 'react-native' }, user: this.userHash ? { id_hash: this.userHash } : {}, attrs: {}, events,
     };
     try {
       const res = await this.fetch(`${this.cfg.endpoint}/v1/rum/events`, {
@@ -140,8 +225,13 @@ class Client {
         body: JSON.stringify(body),
       });
       if (res.ok) { this.failures = 0; }
-      else if (res.status === 429 || res.status >= 500) this.retry(events);
-      // other 4xx: the batch is invalid for good, retrying cannot help
+      else if (res.status === 429 || res.status >= 500) {
+        if (res.status === 429) this.warnOnce('quota', 'rate limit or quota reached (HTTP 429): events are retried with backoff and dropped when the queue is full');
+        this.retry(events);
+      } else {
+        // other 4xx: the batch is invalid for good, retrying cannot help
+        this.warnOnce('refused', `events were refused by the edge (HTTP ${res.status}) and dropped; check the key, its app ids and the SDK version`);
+      }
     } catch (_) {
       this.retry(events);
     }

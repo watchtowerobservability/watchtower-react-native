@@ -5,4 +5,5 @@ RCT_EXTERN_METHOD(start:(NSDictionary *)options)
 RCT_EXTERN_METHOD(record:(NSString *)json)
 RCT_EXTERN_METHOD(crashLoop:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
 RCT_EXTERN_METHOD(flush)
+RCT_EXTERN_METHOD(stop)
 @end

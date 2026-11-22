@@ -14,5 +14,5 @@ Pod::Spec.new do |s|
   s.swift_version = '5.9'
   s.dependency 'React-Core'
   # The native iOS SDK (sdks/ios/WatchtowerSDK.podspec, mirrored as watchtower-ios).
-  s.dependency 'WatchtowerSDK', pkg['version']
+  s.dependency 'WatchtowerSDK', '~> 0.1' # the bridge uses the 0.1 native API; do not tie it to this package's version
 end
