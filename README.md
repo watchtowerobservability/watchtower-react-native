@@ -13,7 +13,7 @@ npm install @watchtowerobservability/react-native
 cd ios && pod install
 ```
 
-GitHub Packages needs a token with `read:packages`; the release tarball installs without one.
+The native Android SDK resolves from Maven Central and the iOS SDK from CocoaPods trunk; no token is needed.
 
 ## Quick start
 

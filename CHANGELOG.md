@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1
+
+- Native Android dependency from Maven Central (`io.github.watchtowerobservability:watchtower-android:0.1.2`), iOS WatchtowerSDK from CocoaPods trunk (`~> 0.1`).
+
 ## 0.2.0
 
 - `setUser({ id })` / `setUser(null)`: the id is sent as `user.id_hash`, SHA-256 of `salt:id` with the project salt from `/v1/rum/config`, exactly like the browser SDK; the raw id never leaves the device. (JS transport; with the native module events go through the native SDK's own batches.)

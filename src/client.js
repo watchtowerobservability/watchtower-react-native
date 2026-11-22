@@ -2,7 +2,7 @@
 const { newId, newTraceId, newSpanId, safeAttrs, maskKey } = require('./util');
 const { sha256Hex } = require('./sha256');
 
-const SDK = { name: 'watchtower.react-native', version: '0.2.0' };
+const SDK = { name: 'watchtower.react-native', version: '0.2.1' };
 const DEFAULT_ENDPOINT = 'http://localhost:4318';
 const QUEUE_MAX = 500;
 const FLUSH_EVENTS = 50;
